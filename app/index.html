@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asignación de Cabinas de Estudio</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎹</text></svg>">
+</head>
+<body>
+
+<header class="app">
+  <h1>🎹 Asignación de Cabinas de Estudio</h1>
+  <p>Conservatorio Profesional de Música "Marcos Redondo" — Ciudad Real</p>
+  <nav class="tabs">
+    <button class="tab-btn activo" data-tab="solicitudes">📋 Solicitudes <span id="num-solicitudes" class="badge info">0</span></button>
+    <button class="tab-btn" data-tab="asignacion">🗓 Asignación</button>
+    <button class="tab-btn" data-tab="empates">⚖ Empates</button>
+    <button class="tab-btn" data-tab="informes">📄 Informes</button>
+    <button class="tab-btn" data-tab="config">⚙ Configuración</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ==================== SOLICITUDES ==================== -->
+  <section id="tab-solicitudes" class="tab-panel vis">
+    <div class="toolbar">
+      <label class="btn" for="input-archivo">📂 Importar Excel / CSV de Forms</label>
+      <input type="file" id="input-archivo" accept=".xlsx,.xls,.csv">
+      <button class="btn sec" id="btn-ejemplo">Cargar datos de ejemplo</button>
+      <span class="sep"></span>
+      <button class="btn peligro" id="btn-vaciar">Vaciar todo</button>
+    </div>
+    <div id="avisos-importacion"></div>
+    <div id="tabla-solicitudes"></div>
+  </section>
+
+  <!-- ==================== ASIGNACIÓN ==================== -->
+  <section id="tab-asignacion" class="tab-panel">
+    <div class="toolbar">
+      <button class="btn grande" id="btn-ejecutar">⚙ Ejecutar asignación automática</button>
+    </div>
+    <div id="contenido-asignacion"></div>
+  </section>
+
+  <!-- ==================== EMPATES ==================== -->
+  <section id="tab-empates" class="tab-panel">
+    <div id="contenido-empates"></div>
+  </section>
+
+  <!-- ==================== INFORMES ==================== -->
+  <section id="tab-informes" class="tab-panel">
+    <p id="aviso-informes">Ejecuta primero la asignación automática para poder generar informes.</p>
+    <div class="toolbar">
+      <button class="btn sec" id="btn-prev-informe">👁 Vista previa (completo)</button>
+      <button class="btn sec" id="btn-prev-publico">👁 Vista previa (público, sin datos personales)</button>
+      <span class="sep"></span>
+      <button class="btn" id="btn-desc-informe">⬇ Descargar HTML completo</button>
+      <button class="btn" id="btn-desc-publico">⬇ Descargar HTML público</button>
+      <button class="btn" id="btn-imprimir">🖨 Imprimir / PDF</button>
+      <button class="btn" id="btn-csv">⬇ Listado CSV (Excel)</button>
+    </div>
+    <iframe id="previsualizacion" title="Previsualización del informe"></iframe>
+  </section>
+
+  <!-- ==================== CONFIGURACIÓN ==================== -->
+  <section id="tab-config" class="tab-panel">
+    <div class="config-form">
+      <label>Curso escolar
+        <input type="text" id="cfg-curso" placeholder="2025-2026">
+      </label>
+      <label>Tiempo máximo por franja — Enseñanzas Profesionales
+        <select id="cfg-max-ep">
+          <option value="90">1 hora 30 minutos (máximo)</option>
+          <option value="60">1 hora</option>
+          <option value="30">30 minutos</option>
+        </select>
+      </label>
+      <label>Tiempo máximo por franja — Enseñanzas Elementales
+        <select id="cfg-max-ee">
+          <option value="90">1 hora 30 minutos (máximo)</option>
+          <option value="60">1 hora</option>
+          <option value="30">30 minutos</option>
+        </select>
+      </label>
+      <p class="nota">La normativa fija el máximo absoluto en 1:30 h por franja horaria. Dar menos tiempo
+        a Enseñanzas Elementales aplica el criterio de «más tiempo a los cursos superiores».
+        Tras cambiar la configuración hay que volver a ejecutar la asignación.</p>
+      <div><button class="btn" id="btn-guardar-config">Guardar configuración</button></div>
+    </div>
+    <div id="tabla-cabinas"></div>
+  </section>
+
+</main>
+
+<!-- ==================== MODAL ==================== -->
+<div id="modal-fondo">
+  <div id="modal">
+    <button id="modal-cerrar" title="Cerrar">✕</button>
+    <div id="modal-cuerpo"></div>
+  </div>
+</div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/report.js"></script>
+<script src="js/datos-ejemplo.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
