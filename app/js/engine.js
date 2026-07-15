@@ -9,14 +9,22 @@
         de Enseñanzas Profesionales.
    Consideración preferible:
      - Tuba, Trombón, Trompa y Trompeta -> 1ª planta si es posible.
-   Priorización:
-     1) Curso superior antes que inferior (y más tiempo máximo
-        por franja a EP que a EE).
-     2) Residencia fuera de Ciudad Real.
-     3) Menos franjas solicitadas antes que más.
+   Priorización (baremo v2 — reparto equitativo de franjas):
+     1) Cada franja YA concedida a un alumno penaliza fuertemente
+        sus siguientes peticiones: nadie recibe su 2ª franja
+        mientras otro aspirante al mismo hueco no tenga la 1ª.
+     2) Curso superior antes que inferior (EP sobre EE, y más
+        tiempo máximo por franja a EP que a EE).
+     3) Residencia fuera de Ciudad Real.
      4) Máximo 1:30 h por franja horaria.
-     5) Orden de llegada de la solicitud.
+     5) Orden de llegada de la solicitud (desempate final).
    ============================================================ */
+
+// ---- Pesos del baremo (v2) ----------------------------------------------------
+const BAREMO_VERSION = 2;
+const BASE_PUNTOS = 20000;            // base común: el total nunca baja de 0
+const PESO_FRANJA_CONCEDIDA = 2000;   // penalización por cada franja ya concedida
+                                      // (> máx de curso+foráneo = 1650: domina siempre)
 
 // ---- Valoración de prioridad ------------------------------------------------
 function puntosCurso(curso) {
@@ -29,59 +37,65 @@ function puntosCurso(curso) {
 function claveValoracion(sol) {
   return {
     curso: puntosCurso(sol.curso),
-    foraneo: sol.foraneo ? 1 : 0,
-    numFranjas: sol.franjas.length
+    foraneo: sol.foraneo ? 1 : 0
   };
 }
 
 // Puntuación ponderada base (mayor = más prioridad). Los pesos respetan el
-// mismo orden jerárquico que compararPrioridad: el curso domina sobre la
-// foraneidad, y esta sobre el número de franjas. Así, dos solicitudes empatan
-// (mismo empateKey) exactamente cuando obtienen el mismo total, y el orden de
-// llegada actúa solo como desempate final (no forma parte de la puntuación).
+// orden jerárquico del baremo: la penalización por franja concedida (dinámica)
+// domina sobre el curso, y este sobre la foraneidad. Dos solicitudes empatan
+// (mismo empateKey) exactamente cuando obtienen el mismo total base, y el
+// orden de llegada actúa solo como desempate final (no forma parte de la
+// puntuación).
 function puntuacionPonderada(sol) {
   const k = claveValoracion(sol);
-  const pCurso = k.curso * 100;                       // 1000 … 16000 (escalón 1000)
-  const pForaneo = k.foraneo ? 50 : 0;                // < 1000: nunca supera un curso mayor
-  const pFranjas = Math.max(0, 20 - k.numFranjas);    // menos franjas = más puntos; < 50
-  return { curso: pCurso, foraneo: pForaneo, franjas: pFranjas, total: pCurso + pForaneo + pFranjas };
+  const pCurso = k.curso * 10;                        // 100 (1EE) … 1600 (6EP)
+  const pForaneo = k.foraneo ? 50 : 0;                // < 100: nunca supera un curso mayor
+  return { base: BASE_PUNTOS, curso: pCurso, foraneo: pForaneo, total: BASE_PUNTOS + pCurso + pForaneo };
 }
 
-// Puntuación DINÁMICA: aplica descuento por cabinas ya conseguidas.
-// Esto permite que un mismo alumno tenga puntos distintos según qué
-// cabinas ya tiene asignadas, evitando que domine en todas sus franjas.
+// Puntuación DINÁMICA: aplica la penalización por franjas ya concedidas.
+// Es el criterio dominante del baremo: la 1ª franja de todo alumno puntúa
+// al máximo, y cada franja concedida resta PESO_FRANJA_CONCEDIDA, de modo
+// que nadie recibe su 2ª franja mientras otro aspirante no tenga la 1ª.
 function puntuacionDinamica(sol, asignacionesActuales) {
   const base = puntuacionPonderada(sol);
 
-  // Contar cabinas ya asignadas (exitosas) de este alumno
+  // Contar franjas ya concedidas (exitosas) de este alumno
   const yaAsignadas = asignacionesActuales.filter(
     a => a.solicitudId === sol.id && a.cabina && a.estado !== 'denegada'
   ).length;
 
-  // Descuento: -50 puntos por cada cabina ya conseguida
-  const descuento = yaAsignadas * 50;
-  const totalDinamico = Math.max(0, base.total - descuento);
-
+  const descuento = yaAsignadas * PESO_FRANJA_CONCEDIDA;
   return {
     ...base,
-    total: totalDinamico,
+    total: base.total - descuento,
     descuentoAplicado: descuento,
     yaPosee: yaAsignadas
   };
 }
 
-// Comparador: mayor curso > foráneo > menos franjas > orden de llegada
+// Comparador ESTÁTICO (sin franjas concedidas):
+// mayor curso > foráneo > orden de llegada
 function compararPrioridad(a, b) {
   const ka = claveValoracion(a), kb = claveValoracion(b);
   if (ka.curso !== kb.curso) return kb.curso - ka.curso;
   if (ka.foraneo !== kb.foraneo) return kb.foraneo - ka.foraneo;
-  if (ka.numFranjas !== kb.numFranjas) return ka.numFranjas - kb.numFranjas;
   return a.orden - b.orden;
+}
+
+// Comparador DINÁMICO entre peticiones {sol, fIdx, yaConcedidas}:
+// menos franjas concedidas > curso > foráneo > llegada > índice de franja
+function compararDinamico(pa, pb) {
+  if (pa.yaConcedidas !== pb.yaConcedidas) return pa.yaConcedidas - pb.yaConcedidas;
+  const cmp = compararPrioridad(pa.sol, pb.sol);
+  if (cmp !== 0) return cmp;
+  return pa.fIdx - pb.fIdx;
 }
 
 function empateKey(sol) {
   const k = claveValoracion(sol);
-  return `${k.curso}|${k.foraneo}|${k.numFranjas}`;
+  return `${k.curso}|${k.foraneo}`;
 }
 
 // ---- Orden de preferencia de cabinas por perfil -------------------------------
@@ -92,6 +106,10 @@ function candidatasCabina(sol, ronda) {
   const esPiano = norm(sol.especialidad) === 'piano';
   const esMetal1P = CFG.especialidadesMetal1P.some(e => norm(e) === norm(sol.especialidad));
   const esEP = sol.curso.etapa === 'EP';
+  // Solicitó piano expresamente en el formulario (casilla PIANO=SÍ). Solo tiene
+  // efecto para alumnado de Enseñanzas Profesionales que no sea de la
+  // especialidad Piano (los pianistas ya tienen garantía por especialidad).
+  const pidePianoEP = esEP && !esPiano && !!sol.piano;
 
   if (esPercusion) return [...CFG.cabinasPercusion];             // ineludible nº 1
 
@@ -107,17 +125,29 @@ function candidatasCabina(sol, ronda) {
       ? ['G', 'F', 'K', 'I', 'M']
       : ['G', 'F', 'K', 'I', 'M', 'D', 'C', 'E', 'H'];
   }
-  if (esMetal1P) {
-    // preferible: 1ª planta
+  if (pidePianoEP) {
+    // EP que solicitó piano: en 1ª ronda accede a cabinas con piano
+    // (verticales; las colas E/H siguen reservadas a pianistas de EP).
+    // Se combina con la preferencia de 1ª planta para metales.
     return ronda === 1
-      ? ['I', 'K', 'M', 'N', 'G', 'F']
-      : ['I', 'K', 'M', 'N', 'G', 'F', 'D', 'C', 'E', 'H'];
+      ? (esMetal1P ? ['I', 'K', 'M', 'G', 'F'] : ['G', 'F', 'K', 'I', 'M'])
+      : (esMetal1P
+          ? ['I', 'K', 'M', 'N', 'G', 'F', 'D', 'C', 'E', 'H']
+          : ['G', 'F', 'K', 'I', 'M', 'N', 'D', 'C', 'E', 'H']);
   }
-  // resto de especialidades: deja libres colas (pianistas), C/D (percusión)
-  // y da algo menos de preferencia a la 1ª planta (metales)
+  if (esMetal1P) {
+    // preferible: 1ª planta. Sin PIANO=SÍ deja libres las cabinas con piano
+    // en 1ª ronda (solo N); en 2ª ronda se abre todo, priorizando 1ª planta.
+    return ronda === 1
+      ? ['N']
+      : ['N', 'I', 'K', 'M', 'G', 'F', 'D', 'C', 'E', 'H'];
+  }
+  // resto de especialidades sin PIANO=SÍ: en 1ª ronda solo la cabina sin piano
+  // (N), para reservar los pianos a pianistas y a EP que los pidieron; en 2ª
+  // ronda se abren todas (si sobran, cualquiera puede ocuparlas).
   return ronda === 1
-    ? ['F', 'G', 'N', 'K', 'I', 'M']
-    : ['F', 'G', 'N', 'K', 'I', 'M', 'D', 'C', 'E', 'H'];
+    ? ['N']
+    : ['N', 'F', 'G', 'K', 'I', 'M', 'D', 'C', 'E', 'H'];
 }
 
 function requierePiano(sol) {
@@ -163,7 +193,7 @@ function ejecutarAsignacion(solicitudes, ajustes) {
   }));
   log.push(`Solicitudes valoradas y ordenadas: ${orden.length}.`);
 
-  // 2) Detectar empates de valoración (mismo curso, foraneidad y nº de franjas)
+  // 2) Detectar empates de valoración (mismo curso y foraneidad)
   const grupos = {};
   for (const s of orden) {
     const k = empateKey(s);
@@ -221,7 +251,6 @@ function ejecutarAsignacion(solicitudes, ajustes) {
   };
 
   let nAsig = 0;
-  const pendientes = [];
 
   const intentar = (sol, franja, fIdx, ronda, permitirReducir) => {
     const maxSlots = maxSlotsDe(sol);
@@ -252,35 +281,72 @@ function ejecutarAsignacion(solicitudes, ajustes) {
     return false;
   };
 
-  // Ronda 1: por prioridad, franja completa, con reservas de cabina
+  // Reparto FRANJA a FRANJA con cola de prioridad dinámica: tras cada
+  // concesión se reordena, de modo que las peticiones de quien ya tiene
+  // una franja caen por debajo de quien aún no tiene ninguna (reparto
+  // equitativo y maximización del nº de solicitantes atendidos).
+  const concedidas = {}; // solId -> nº de franjas concedidas en esta ejecución
+  const yaDe = (sol) => concedidas[sol.id] || 0;
+
+  const repartir = (peticiones, ronda, permitirReducir) => {
+    const fallidas = [];
+    const pendientesRonda = [...peticiones];
+    while (pendientesRonda.length) {
+      pendientesRonda.forEach(p => { p.yaConcedidas = yaDe(p.sol); });
+      pendientesRonda.sort(compararDinamico);
+      const p = pendientesRonda.shift();
+      if (intentar(p.sol, p.franja, p.fIdx, ronda, permitirReducir)) {
+        concedidas[p.sol.id] = yaDe(p.sol) + 1;
+      } else {
+        fallidas.push(p);
+      }
+    }
+    return fallidas;
+  };
+
+  const peticiones = [];
   for (const sol of orden) {
-    sol.franjas.forEach((franja, fIdx) => {
-      if (!intentar(sol, franja, fIdx, 1, false)) pendientes.push({ sol, franja, fIdx });
-    });
+    sol.franjas.forEach((franja, fIdx) => peticiones.push({ sol, franja, fIdx }));
   }
-  log.push(`Ronda 1 (con reservas de cola y percusión): ${nAsig} franjas asignadas.`);
+
+  // Ronda 1: reparto equitativo, franja completa, con reservas de cabina
+  const pendientesR2 = repartir(peticiones, 1, false);
+  log.push(`Ronda 1 (reparto equitativo, con reservas de cola y percusión): ${nAsig} franjas asignadas.`);
 
   // Ronda 2: sin reservas y permitiendo reducir la duración
   const antes = nAsig;
-  for (const p of pendientes) {
-    if (!intentar(p.sol, p.franja, p.fIdx, 2, true)) {
-      asignaciones.push({
-        id: `asig-${p.sol.id}-f${p.fIdx}`, solicitudId: p.sol.id, franjaIdx: p.fIdx,
-        dia: p.franja.dia, cabina: null,
-        slots: [], solicitados: p.franja.slots,
-        estado: 'denegada', recortadaPorMax: false,
-        motivo: motivoDenegacion(p.sol, p.franja),
-        ronda: 2, manual: false
-      });
-    }
+  for (const p of repartir(pendientesR2, 2, true)) {
+    asignaciones.push({
+      id: `asig-${p.sol.id}-f${p.fIdx}`, solicitudId: p.sol.id, franjaIdx: p.fIdx,
+      dia: p.franja.dia, cabina: null,
+      slots: [], solicitados: p.franja.slots,
+      estado: 'denegada', recortadaPorMax: false,
+      motivo: motivoDenegacion(p.sol, p.franja),
+      ronda: 2, manual: false
+    });
   }
   log.push(`Ronda 2 (sin reservas, con reducción de franja): ${nAsig - antes} franjas adicionales.`);
-  const denegadas = asignaciones.filter(a => a.estado === 'denegada').length;
-  if (denegadas) log.push(`${denegadas} franja(s) denegadas por falta de disponibilidad.`);
+  const nDenegadas = asignaciones.filter(a => a.estado === 'denegada').length;
+  if (nDenegadas) log.push(`${nDenegadas} franja(s) no atendidas por falta de disponibilidad.`);
+
+  // Franjas no atendidas, ordenadas por baremación final (mayor a menor)
+  const noAtendidas = asignaciones
+    .filter(a => a.estado === 'denegada')
+    .map(a => {
+      const sol = porId[a.solicitudId];
+      return {
+        solicitudId: a.solicitudId, franjaIdx: a.franjaIdx,
+        dia: a.dia, solicitados: a.solicitados,
+        puntos: puntuacionDinamica(sol, asignaciones),
+        orden: sol.orden
+      };
+    })
+    .sort((x, y) => (y.puntos.total - x.puntos.total) || (x.orden - y.orden));
 
   return {
     fecha: new Date().toISOString(),
-    prioridad, empates, demanda, asignaciones, log
+    baremoVersion: BAREMO_VERSION,
+    prioridad, empates, demanda, asignaciones, noAtendidas, log
   };
 }
 
@@ -288,14 +354,19 @@ function construirMotivo(sol, cab, franja, slots, recortadaPorMax, ronda) {
   const partes = [];
   const info = cabinaInfo(cab);
   const esp = norm(sol.especialidad);
+  const esEP = sol.curso.etapa === 'EP';
   if (esp === 'percusion') partes.push('Percusión: cabina reservada C/D');
-  else if (esp === 'piano' && sol.curso.etapa === 'EP') {
+  else if (esp === 'piano' && esEP) {
     partes.push(info.piano && info.piano.tipo === 'cola'
       ? 'Pianista de EP: piano de cola prioritario'
       : 'Pianista de EP: cabina con piano garantizada');
   } else if (esp === 'piano') partes.push('Pianista de EE: cabina con piano si hay disponibilidad');
-  else if (CFG.especialidadesMetal1P.some(e => norm(e) === esp) && info.planta === 1) {
+  else if (esEP && sol.piano && info.piano) {
+    partes.push('Solicitó piano (EP): cabina con piano prioritaria');
+  } else if (CFG.especialidadesMetal1P.some(e => norm(e) === esp) && info.planta === 1) {
     partes.push('Metal: preferencia de 1ª planta aplicada');
+  } else if (!sol.piano && info.piano && ronda === 2) {
+    partes.push('No solicitó piano: cabina con piano ocupada por disponibilidad (2ª ronda)');
   }
   if (recortadaPorMax) {
     partes.push(`Franja recortada al máximo permitido (${sol.curso.etapa === 'EE' ? 'EE' : 'EP'})`);
@@ -310,6 +381,9 @@ function motivoDenegacion(sol, franja) {
     return `Sin hueco en las cabinas de Percusión (C/D) el ${diaNombre(franja.dia)} ${rangoLabel(franja.slots)}`;
   }
   if (esp === 'piano' && sol.curso.etapa === 'EP') {
+    return `Sin cabina con piano libre el ${diaNombre(franja.dia)} ${rangoLabel(franja.slots)}`;
+  }
+  if (sol.curso.etapa === 'EP' && sol.piano) {
     return `Sin cabina con piano libre el ${diaNombre(franja.dia)} ${rangoLabel(franja.slots)}`;
   }
   return `Sin cabina libre el ${diaNombre(franja.dia)} ${rangoLabel(franja.slots)}`;

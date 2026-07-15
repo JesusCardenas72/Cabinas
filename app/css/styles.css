@@ -234,6 +234,10 @@ span.punto.fam-canto     { background: var(--fam-canto); }
 /* ---- Stats y registro ---- */
 .stats { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .stats-fecha { font-size: .8rem; color: #777; }
+.aviso-noatendidas {
+  background: #fdeeee; border: 1px solid #e0a0a0; border-radius: 8px;
+  padding: 8px 12px; margin-bottom: 10px; font-size: .9rem; color: #8a2b2b;
+}
 details.log { margin: 8px 0 14px; font-size: .85rem; }
 details.log summary { cursor: pointer; color: var(--azul); }
 details.log ul { margin: 6px 0; }

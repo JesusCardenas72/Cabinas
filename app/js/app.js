@@ -36,6 +36,11 @@ function cargarEstado() {
     App.resultado = st.resultado || null;
     App.ajustes = Object.assign({}, AJUSTES_DEFECTO, st.ajustes || {});
     App.avisos = st.avisos || [];
+    // Migración: descartar resultados calculados con un baremo anterior
+    if (App.resultado && App.resultado.baremoVersion !== BAREMO_VERSION) {
+      App.resultado = null;
+      App.avisos.push('El baremo de puntuación ha cambiado: vuelve a ejecutar la asignación automática.');
+    }
   } catch (e) { console.warn('No se pudo cargar el estado:', e); }
 }
 
@@ -184,11 +189,10 @@ function abrirDetalleSolicitud(solId, volverAsigId) {
     <ul class="valoracion">
       <li>Puntos por curso (${escapeHtml(s.curso.label)}): <b>${k.curso}</b></li>
       <li>Residencia fuera de ${escapeHtml(CFG.localidadCentro)}: <b>${k.foraneo ? 'SÍ' : 'NO'}</b></li>
-      <li>Franjas solicitadas: <b>${k.numFranjas}</b> (menos franjas = más prioridad)</li>
       <li><b>Puntuación base: ${pp.total}</b>
-        <small>(curso ${pp.curso} + foráneo ${pp.foraneo} + franjas ${pp.franjas})</small></li>
+        <small>(base ${pp.base} + curso ${pp.curso} + foráneo ${pp.foraneo})</small></li>
       ${ppDinamica.yaPosee > 0 ? `<li><b style="color:#e91e63">Puntuación dinámica: ${ppDinamica.total}</b>
-        <small>(base ${pp.total} − ${ppDinamica.descuentoAplicado} por tener ${ppDinamica.yaPosee} cabina${ppDinamica.yaPosee > 1 ? 's' : ''} asignada${ppDinamica.yaPosee > 1 ? 's' : ''})</small></li>` : ''}
+        <small>(base ${pp.total} − ${ppDinamica.descuentoAplicado} por tener ${ppDinamica.yaPosee} franja${ppDinamica.yaPosee > 1 ? 's' : ''} ya concedida${ppDinamica.yaPosee > 1 ? 's' : ''})</small></li>` : ''}
       <li>Desempate final: orden de llegada nº <b>${s.orden}</b></li>
     </ul>
     <h3>Resolución</h3>
@@ -248,7 +252,12 @@ function ejecutar() {
   App.resultado = ejecutarAsignacion(App.solicitudes, App.ajustes);
   guardarEstado();
   renderTodo();
-  toast('Asignación automática completada.', 'ok');
+  const noAt = (App.resultado.noAtendidas || []).length;
+  if (noAt) {
+    toast(`Asignación completada: ${noAt} franja(s) sin atender. Revisa la lista al pie de la rejilla.`, 'error');
+  } else {
+    toast('Asignación automática completada.', 'ok');
+  }
 }
 
 // ---- Concurrencia de solicitudes (coincidencias y empates por horario) --------
@@ -352,6 +361,8 @@ function renderAsignacion() {
       <span class="badge info grande">${res.empates.length} grupos de empate</span>
       <span class="stats-fecha">Calculada: ${new Date(res.fecha).toLocaleString('es-ES')}</span>
     </div>
+    ${nD ? `<div class="aviso-noatendidas">⚠ <b>${nD} franja(s) no atendidas</b> por falta de disponibilidad.
+      Consulta la lista al pie de la rejilla, ordenada por baremación.</div>` : ''}
     <details class="log"><summary>Registro del proceso</summary>
       <ul>${res.log.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>
     </details>
@@ -576,9 +587,14 @@ function intercambiarAsignaciones(a, b) {
 function promocionarSiguiente(dia, cabina, freeSlots, movedId) {
   const asigs = App.resultado.asignaciones;
   const pos = id => (App.resultado.prioridad.find(p => p.solicitudId === id) || {}).posicion || Infinity;
+  // Criterio del baremo: primero quien MENOS franjas tiene ya concedidas
+  // (excluyendo la propia asignación candidata: moverse de cabina no cambia
+  // su nº de franjas), y a igualdad, la posición de prioridad estática.
+  const yaConcedidasDe = (c) => asigs.filter(x =>
+    x.solicitudId === c.solicitudId && x.id !== c.id && x.cabina && x.estado !== 'denegada').length;
   const contendientes = asigs
     .filter(x => x.id !== movedId && x.dia === dia && x.solicitados.some(s => freeSlots.includes(s)))
-    .sort((x, y) => pos(x.solicitudId) - pos(y.solicitudId));
+    .sort((x, y) => (yaConcedidasDe(x) - yaConcedidasDe(y)) || (pos(x.solicitudId) - pos(y.solicitudId)));
 
   const intentarRonda = (ronda) => {
     for (const c of contendientes) {
@@ -612,28 +628,54 @@ function promocionarSiguiente(dia, cabina, freeSlots, movedId) {
 
 function renderDenegadas() {
   const res = App.resultado;
-  const denegadas = res.asignaciones.filter(a => a.estado === 'denegada');
   const parciales = res.asignaciones.filter(a => a.estado === 'parcial');
+  const asigDe = (na) => res.asignaciones.find(a =>
+    a.solicitudId === na.solicitudId && a.franjaIdx === na.franjaIdx && a.estado === 'denegada');
+  // Denegadas ordenadas por baremación (mayor a menor); fallback si el
+  // resultado guardado no trae noAtendidas.
+  const noAtendidas = res.noAtendidas || res.asignaciones
+    .filter(a => a.estado === 'denegada')
+    .map(a => {
+      const s = solicitudPorId(a.solicitudId);
+      return { solicitudId: a.solicitudId, franjaIdx: a.franjaIdx, dia: a.dia,
+               solicitados: a.solicitados, puntos: puntuacionDinamica(s, res.asignaciones), orden: s.orden };
+    })
+    .sort((x, y) => (y.puntos.total - x.puntos.total) || (x.orden - y.orden));
   const el = $('#lista-denegadas');
-  if (!denegadas.length && !parciales.length) { el.innerHTML = ''; return; }
+  if (!noAtendidas.length && !parciales.length) { el.innerHTML = ''; return; }
 
-  const fila = (a) => {
+  const puntosCelda = (pp) => pp
+    ? `<td class="centro" title="Base ${pp.base} + curso ${pp.curso} + foráneo ${pp.foraneo}${pp.yaPosee ? ` − ${pp.descuentoAplicado} por ${pp.yaPosee} franja(s) ya concedida(s)` : ''}">
+        <b>${pp.total}</b></td>`
+    : '<td class="centro">—</td>';
+
+  const fila = (a, pp) => {
     const s = solicitudPorId(a.solicitudId);
     return `<tr>
       <td>${chipAlumno(s)}</td>
       <td>${diaNombre(a.dia)} ${rangoLabel(a.solicitados)}</td>
       <td>${a.slots.length ? rangoLabel(a.slots) + ' en ' + a.cabina : '—'}</td>
+      ${puntosCelda(pp)}
       <td><small>${escapeHtml(a.motivo)}</small></td>
       <td>${badgeEstado(a.estado)}</td>
       <td><button class="btn peq" data-editar="${a.id}">${a.estado === 'denegada' ? 'Asignar manualmente' : 'Modificar'}</button></td>
     </tr>`;
   };
 
+  const filasDenegadas = noAtendidas.map(na => {
+    const a = asigDe(na);
+    return a ? fila(a, na.puntos) : '';
+  }).join('');
+  const filasParciales = parciales.map(a =>
+    fila(a, puntuacionDinamica(solicitudPorId(a.solicitudId), res.asignaciones))).join('');
+
   el.innerHTML = `
-    <h3>Franjas denegadas o reducidas</h3>
+    <h3>Franjas no atendidas o reducidas</h3>
+    <p class="nota">Las no atendidas se listan por orden de baremación (mayor a menor puntuación);
+    pasa el ratón por la puntuación para ver el desglose.</p>
     <div class="tabla-scroll"><table class="tabla">
-      <thead><tr><th>Alumno/a</th><th>Solicitado</th><th>Concedido</th><th>Motivo</th><th>Estado</th><th></th></tr></thead>
-      <tbody>${[...denegadas, ...parciales].map(fila).join('')}</tbody>
+      <thead><tr><th>Alumno/a</th><th>Solicitado</th><th>Concedido</th><th>Puntuación</th><th>Motivo</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${filasDenegadas}${filasParciales}</tbody>
     </table></div>`;
 
   el.querySelectorAll('button[data-editar]').forEach(b => {
@@ -655,22 +697,23 @@ function abrirDetalleAsignacion(asigId) {
   const concurrenciaHtml = rk.entradas.length > 1
     ? `<h3>Concurrencia en ${diaNombre(a.dia)} ${rangoLabel(slotsHorario)}</h3>
        <p class="nota">${rk.entradas.length} solicitudes competían por este horario, ordenadas por
-       <b>puntuación dinámica</b> (se descuentan puntos según cabinas ya conseguidas). Resaltada, la de esta cabina.</p>
+       <b>puntuación dinámica</b> (cada franja ya concedida resta ${PESO_FRANJA_CONCEDIDA} puntos:
+       nadie recibe su 2ª franja mientras otro aspirante no tenga la 1ª). Resaltada, la de esta cabina.</p>
        <div class="tabla-scroll"><table class="tabla mini concurrencia">
          <thead><tr>
            <th>#</th><th>Alumno/a</th>
-           <th title="Curso ×100 + foráneo + (20 − nº franjas) − 50×cabinas conseguidas">Puntuación</th>
+           <th title="Base ${BASE_PUNTOS} + curso×10 + foráneo (50) − ${PESO_FRANJA_CONCEDIDA}×franjas ya concedidas; desempate por orden de llegada">Puntuación</th>
            <th title="Orden de llegada (desempate final)">Llegada</th>
            <th>Resolución aquí</th>
          </tr></thead>
          <tbody>${rk.entradas.map((e, i) => {
            const descuentoTxt = e.pp.yaPosee > 0
-             ? ` (base ${e.pp.curso + e.pp.foraneo + e.pp.franjas} − ${e.pp.descuentoAplicado} por ${e.pp.yaPosee} cabina${e.pp.yaPosee > 1 ? 's' : ''})`
+             ? ` (base ${e.pp.base + e.pp.curso + e.pp.foraneo} − ${e.pp.descuentoAplicado} por ${e.pp.yaPosee} franja${e.pp.yaPosee > 1 ? 's' : ''} ya concedida${e.pp.yaPosee > 1 ? 's' : ''})`
              : '';
            return `<tr class="${e.esGanador ? 'fila-ganador' : ''}${e.empate ? ' fila-empate' : ''}" data-sol="${e.id}">
              <td class="centro">${i + 1}</td>
              <td>${chipAlumno(e.s)}${e.esGanador ? ' <span class="badge info">esta cabina</span>' : ''}</td>
-             <td class="centro" title="Curso ${e.pp.curso} + foráneo ${e.pp.foraneo} + franjas ${e.pp.franjas}${descuentoTxt}">
+             <td class="centro" title="Base ${e.pp.base} + curso ${e.pp.curso} + foráneo ${e.pp.foraneo}${descuentoTxt}">
                <b>${e.pp.total}</b>${e.empate ? ' <span class="badge warn">empate</span>' : ''}${e.pp.yaPosee > 0 ? ` <small style="color:#999">−${e.pp.descuentoAplicado}</small>` : ''}</td>
              <td class="centro">nº ${e.s.orden}</td>
              <td>${resolucionBadge(e.res)}</td>
@@ -790,8 +833,8 @@ function renderEmpates() {
   }
 
   cont.innerHTML = `<p class="explicacion">
-    Dos o más solicitudes <b>empatan</b> cuando comparten curso (mismos puntos), condición de
-    residencia y número de franjas solicitadas. El empate se resuelve automáticamente por
+    Dos o más solicitudes <b>empatan</b> cuando comparten curso (mismos puntos) y condición de
+    residencia. El empate se resuelve automáticamente por
     <b>orden de llegada</b>, pero aquí se muestra toda la información para que el personal
     responsable pueda revisarlo y modificarlo si lo considera oportuno.
   </p>` + res.empates.map((g, gi) => {
@@ -880,12 +923,18 @@ function renderConfig() {
   $('#cfg-max-ep').value = String(App.ajustes.maxMinutosEP);
   $('#cfg-max-ee').value = String(App.ajustes.maxMinutosEE);
 
+  const reservaDe = (c) => {
+    if (CFG.cabinasPercusion.includes(c.id)) return 'Percusión';
+    if (c.piano && c.piano.tipo === 'cola') return 'Pianistas EP (cola)';
+    if (c.piano) return 'Pianistas y EP con piano solicitado (1ª ronda)';
+    return 'Libre (sin piano)';
+  };
   const tabla = CFG.cabinas.map(c => `<tr>
     <td class="centro"><b>${c.id}</b></td>
     <td class="centro">${c.planta}</td>
     <td>${c.piano ? escapeHtml(c.piano.nombre) : '—'}</td>
     <td class="centro">${c.piano ? (c.piano.tipo === 'cola' ? 'Cola' : 'Vertical') : 'Sin piano'}</td>
-    <td class="centro">${CFG.cabinasPercusion.includes(c.id) ? 'Percusión' : ''}</td>
+    <td class="centro">${reservaDe(c)}</td>
   </tr>`).join('');
   $('#tabla-cabinas').innerHTML = `<table class="tabla mini">
     <thead><tr><th>Cabina</th><th>Planta</th><th>Piano</th><th>Tipo</th><th>Reserva</th></tr></thead>

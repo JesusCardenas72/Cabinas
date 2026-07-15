@@ -84,16 +84,33 @@ function generarInformeHTML(state, opciones) {
     </tr>`;
   }
 
-  // ---- Denegadas ----
+  // ---- Franjas no atendidas (ordenadas por baremación, mayor a menor) ----
   const denegadas = res.asignaciones.filter(a => a.estado === 'denegada');
-  const denegadasHtml = denegadas.length
-    ? `<table class="lista"><thead><tr><th>Alumno/a</th><th>Franja solicitada</th><th>Motivo</th></tr></thead><tbody>` +
-      denegadas.map(a => {
+  const noAtendidas = res.noAtendidas || denegadas
+    .map(a => {
+      const s = porId[a.solicitudId];
+      return { solicitudId: a.solicitudId, franjaIdx: a.franjaIdx, dia: a.dia,
+               solicitados: a.solicitados, puntos: puntuacionDinamica(s, res.asignaciones), orden: s.orden };
+    })
+    .sort((x, y) => (y.puntos.total - x.puntos.total) || (x.orden - y.orden));
+  const asigDe = (na) => denegadas.find(a =>
+    a.solicitudId === na.solicitudId && a.franjaIdx === na.franjaIdx);
+  const denegadasHtml = noAtendidas.length
+    ? `<p>Ordenadas por baremación (mayor a menor puntuación).</p>
+      <table class="lista"><thead><tr><th>Alumno/a</th><th>Franja solicitada</th><th>Puntuación</th><th>Motivo</th></tr></thead><tbody>` +
+      noAtendidas.map(na => {
+        const a = asigDe(na);
+        if (!a) return '';
         const s = porId[a.solicitudId];
+        const pp = na.puntos;
+        const desglose = `base ${pp.base} + curso ${pp.curso} + foráneo ${pp.foraneo}` +
+          (pp.yaPosee ? ` − ${pp.descuentoAplicado} (${pp.yaPosee} franja(s) ya concedida(s))` : '');
         return `<tr><td>${nombreDe(s)} (${escapeHtml(s.curso.label)}, ${escapeHtml(s.especialidad)})</td>
-          <td>${diaNombre(a.dia)} ${rangoLabel(a.solicitados)}</td><td>${escapeHtml(a.motivo)}</td></tr>`;
+          <td>${diaNombre(a.dia)} ${rangoLabel(a.solicitados)}</td>
+          <td><b>${pp.total}</b> <small>(${desglose})</small></td>
+          <td>${escapeHtml(a.motivo)}</td></tr>`;
       }).join('') + '</tbody></table>'
-    : '<p>No hay franjas denegadas.</p>';
+    : '<p>No hay franjas sin atender.</p>';
 
   // ---- Empates ----
   const empatesHtml = res.empates.length
@@ -110,7 +127,7 @@ function generarInformeHTML(state, opciones) {
           ? `<p class="conc">⚠ Concurrencia directa en: ${g.concurrencias.map(c =>
               `${diaNombre(c.dia)} ${tramoLabel(c.slot)}`).join(', ')}</p>`
           : '';
-        return `<div class="empate"><h3>Empate de valoración (${g.ids.length} solicitudes) — resuelto por orden de llegada</h3>${conc}<ul>${miembros}</ul></div>`;
+        return `<div class="empate"><h3>Empate de valoración (${g.ids.length} solicitudes con mismo curso y residencia) — resuelto por orden de llegada</h3>${conc}<ul>${miembros}</ul></div>`;
       }).join('')
     : '<p>No se han producido empates de valoración.</p>';
 
@@ -186,7 +203,7 @@ ${rejillas}
 </table>
 </div>
 
-<h2>Franjas denegadas</h2>
+<h2>Franjas no atendidas</h2>
 ${denegadasHtml}
 
 <h2>Empates de valoración y concurrencias</h2>

@@ -47,20 +47,25 @@ puede cerrar y continuar más tarde en el mismo equipo.
 
 1. Percusión → solo cabinas C y D.
 2. Pianistas → cabinas con piano; los **pianos de cola (E y H)** se reservan con
-   prioridad para pianistas frente a otras especialidades.
-3. La garantía de cabina con piano se aplica solo a alumnado de **Piano de Enseñanzas
-   Profesionales** (regla 3); el resto puede ocupar cabinas con piano si quedan libres.
+   prioridad para pianistas de Enseñanzas Profesionales frente a otras especialidades.
+3. Las cabinas con piano se reservan en **1ª ronda** al alumnado de la especialidad
+   Piano y al de **Enseñanzas Profesionales que marque «PIANO = SÍ»** en la solicitud;
+   el resto (Elementales, o quien no solicitó piano) solo las ocupa si quedan libres
+   (**2ª ronda**). La única cabina sin piano es la **N**.
 
 **Preferible**
 
 - Tuba, Trombón, Trompa y Trompeta → 1ª planta (I, K, M, N) si es posible.
 
-**Priorización** (en este orden)
+**Priorización** (en este orden, solo cuando hay concurrencia por el mismo día-hora)
 
-1. Curso, de superior a inferior (6ºEP … 1ºEP > 4ºEE … 1ºEE). Además, EP recibe más
+1. **Menos cabinas ya concedidas** (criterio dominante): la 1ª franja de cada alumno
+   puntúa al máximo y cada franja concedida penaliza sus siguientes peticiones, de modo
+   que nadie recibe su 2ª franja mientras otro aspirante al mismo hueco no tenga la 1ª.
+   Reparte las cabinas de forma equitativa y maximiza el nº de solicitantes atendidos.
+2. Curso, de superior a inferior (6ºEP … 1ºEP > 4ºEE … 1ºEE). Además, EP recibe más
    tiempo máximo por franja que EE (configurable: 90/60 minutos por defecto).
-2. Residencia fuera de Ciudad Real.
-3. Menos franjas solicitadas.
+3. Residencia fuera de Ciudad Real.
 4. Máximo 1:30 h por franja horaria (recorte automático).
 5. Orden de llegada de la solicitud (marca de tiempo de Forms). Es también el criterio
    que resuelve los empates, que quedan documentados en la pestaña Empates.
